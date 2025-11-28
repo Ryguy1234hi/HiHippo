@@ -1,0 +1,17 @@
+variables
+variables can only be stated as capital letters example:
+A="hello"
+B=5+10
+print(A)
+print(B)
+
+math
+if you want to print 1+4 you have to write it like
+A=1
+B=+
+C=4
+print(A)+(B+(C)
+if you just make it 
+A=1+4
+print(A)
+you will get 5 in the console not 1+4
