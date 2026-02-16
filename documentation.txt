@@ -15,3 +15,20 @@ if you just make it
 A=1+4
 print(A)
 you will get 5 in the console not 1+4
+Libraries
+hippogame is the only current library in HiHippo
+and to start a hippogame program you have to write import hippogame
+here is a example game
+
+import hippogame
+
+print "Game Starting"
+
+set_color green
+draw_circle player 400 300 20
+d
+forever:
+    if_key Left move player -5 0
+    if_key Right move player 5 0
+    if_key Up move player 0 -5
+    if_key Down move player 0 5
