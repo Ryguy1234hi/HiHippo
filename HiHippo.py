@@ -1,87 +1,47 @@
 import tkinter as tk
 from tkinter import scrolledtext, filedialog, messagebox
+import pygame
+import threading
+import json
 import re
-import ast
-import operator
-import time
 
-# ==========================================================
-# SAFE MATH SYSTEM
-# ==========================================================
+# ===============================
+# GLOBAL STATE
+# ===============================
 
 variables = {}
+objects = {}
+loop_block = []
+keys_pressed = set()
 
-allowed_operators = {
-    ast.Add: operator.add,
-    ast.Sub: operator.sub,
-    ast.Mult: operator.mul,
-    ast.Div: operator.truediv,
-    ast.Pow: operator.pow,
-    ast.USub: operator.neg
+hippogame_enabled = False
+engine_running = False
+game_thread = None
+
+current_color = (255, 255, 255)
+
+COLOR_MAP = {
+    "red": (255, 0, 0),
+    "green": (0, 255, 0),
+    "blue": (0, 0, 255),
+    "white": (255, 255, 255),
+    "black": (0, 0, 0),
+    "yellow": (255, 255, 0),
 }
 
-def safe_eval(node):
-    if isinstance(node, ast.Num):
-        return node.n
-    elif isinstance(node, ast.BinOp):
-        return allowed_operators[type(node.op)](
-            safe_eval(node.left),
-            safe_eval(node.right)
-        )
-    elif isinstance(node, ast.UnaryOp):
-        return allowed_operators[type(node.op)](
-            safe_eval(node.operand)
-        )
-    else:
-        raise TypeError("Unsupported expression")
+# ===============================
+# EXPRESSION SYSTEM
+# ===============================
 
 def eval_math(expr):
     for var in variables:
-        if isinstance(variables[var], (int, float)):
-            expr = re.sub(rf'\b{var}\b', str(variables[var]), expr)
+        expr = re.sub(rf'\b{var}\b', str(variables[var]), expr)
     try:
-        node = ast.parse(expr, mode='eval').body
-        return safe_eval(node)
+        return eval(expr)
     except:
         return expr
 
-# ==========================================================
-# HIPPO GAME ENGINE
-# ==========================================================
-
-hippogame_enabled = False
-game_window = None
-canvas = None
-objects = {}
-keys_pressed = set()
-current_color = "white"
-
-def setup_game():
-    global game_window, canvas
-    game_window = tk.Toplevel(window)
-    game_window.title("HippoGame Engine")
-    game_window.geometry("600x600")
-
-    canvas = tk.Canvas(game_window, bg="black")
-    canvas.pack(fill=tk.BOTH, expand=True)
-
-    game_window.bind("<KeyPress>", key_down)
-    game_window.bind("<KeyRelease>", key_up)
-    game_window.focus_set()
-
-def key_down(event):
-    keys_pressed.add(event.keysym)
-
-def key_up(event):
-    if event.keysym in keys_pressed:
-        keys_pressed.remove(event.keysym)
-
-# ==========================================================
-# LANGUAGE INTERPRETER
-# ==========================================================
-
 def eval_expression(expr):
-    expr = expr.replace("(", "").replace(")", "")
     parts = re.split(r'\+(?=(?:[^"]*"[^"]*")*[^"]*$)', expr)
     result = ""
     for part in parts:
@@ -91,179 +51,208 @@ def eval_expression(expr):
         elif part.startswith('"') and part.endswith('"'):
             result += part.strip('"')
         else:
-            try:
-                result += str(eval_math(part))
-            except:
-                result += part
+            result += str(eval_math(part))
     return result
 
 def parse_assignment(line):
     parts = line.split(",")
     for p in parts:
         name, value = p.split("=")
-        name = name.strip()
-        value = value.strip()
-        if value.startswith('"') and value.endswith('"'):
-            variables[name] = value.strip('"')
-        else:
-            variables[name] = eval_math(value)
+        variables[name.strip()] = eval_math(value.strip())
+
+# ===============================
+# COMMAND HANDLER
+# ===============================
 
 def run_line(line):
-    global hippogame_enabled, current_color
+    global current_color, hippogame_enabled
 
-    # Import hippogame
-    if line == "import hippogame":
-        hippogame_enabled = True
-        setup_game()
+    if not line:
         return ""
 
-    # Assignment
-    if "=" in line and not line.startswith("print"):
+    if line.startswith("import hippogame"):
+        hippogame_enabled = True
+        return "HippoGame Enabled"
+
+    if "=" in line and not line.startswith("if_key"):
         parse_assignment(line)
         return ""
 
-    # Print
     if line.startswith("print"):
         expr = line[len("print"):].strip()
         return eval_expression(expr)
 
-    # ==================================================
-    # GAME ENGINE COMMANDS
-    # ==================================================
+    if line.startswith("set_color"):
+        color_name = line.split()[1]
+        current_color = COLOR_MAP.get(color_name.lower(), (255, 255, 255))
+        return ""
 
-    if hippogame_enabled:
+    if line.startswith("draw_circle"):
+        parts = line.split()
+        name = parts[1]
+        x = int(eval_math(parts[2]))
+        y = int(eval_math(parts[3]))
+        radius = int(eval_math(parts[4]))
+        objects[name] = {
+            "type": "circle",
+            "x": x,
+            "y": y,
+            "r": radius,
+            "color": current_color
+        }
+        return ""
 
-        # Clear screen
-        if line == "clear":
-            canvas.delete("all")
-            return ""
+    if line.startswith("move"):
+        parts = line.split()
+        name = parts[1]
+        dx = int(eval_math(parts[2]))
+        dy = int(eval_math(parts[3]))
+        if name in objects:
+            objects[name]["x"] += dx
+            objects[name]["y"] += dy
+        return ""
 
-        # Set color
-        if line.startswith("set_color"):
-            current_color = line.split()[1]
-            return ""
-
-        # Draw rectangle
-        if line.startswith("draw_rect"):
-            parts = line.split()
-            name = parts[1]
-            x = int(eval_math(parts[2]))
-            y = int(eval_math(parts[3]))
-            w = int(eval_math(parts[4]))
-            h = int(eval_math(parts[5]))
-            obj = canvas.create_rectangle(x, y, x+w, y+h, fill=current_color)
-            objects[name] = obj
-            return ""
-
-        # Draw circle
-        if line.startswith("draw_circle"):
-            parts = line.split()
-            name = parts[1]
-            x = int(eval_math(parts[2]))
-            y = int(eval_math(parts[3]))
-            r = int(eval_math(parts[4]))
-            obj = canvas.create_oval(x-r, y-r, x+r, y+r, fill=current_color)
-            objects[name] = obj
-            return ""
-
-        # Draw text
-        if line.startswith("draw_text"):
-            parts = re.split(r'\s+(?=(?:[^"]*"[^"]*")*[^"]*$)', line)
-            name = parts[1]
-            x = int(eval_math(parts[2]))
-            y = int(eval_math(parts[3]))
-            text = parts[4].strip('"')
-            obj = canvas.create_text(x, y, text=text, fill=current_color, font=("Arial", 18))
-            objects[name] = obj
-            return ""
-
-        # Move object
-        if line.startswith("move"):
-            parts = line.split()
-            name = parts[1]
-            dx = int(eval_math(parts[2]))
-            dy = int(eval_math(parts[3]))
-            if name in objects:
-                canvas.move(objects[name], dx, dy)
-            return ""
-
-        # Key check
-        if line.startswith("if_key"):
-            parts = line.split()
-            key = parts[1]
-            action = " ".join(parts[2:])
-            if key in keys_pressed:
-                run_line(action)
-            return ""
-
-        # Sleep
-        if line.startswith("sleep"):
-            seconds = float(line.split()[1])
-            time.sleep(seconds)
-            return ""
-
-        # Update screen
-        if line == "update":
-            game_window.update()
-            return ""
+    if line.startswith("if_key"):
+        parts = line.split()
+        key = parts[1]
+        action = " ".join(parts[2:])
+        if key in keys_pressed:
+            run_line(action)
+        return ""
 
     return ""
 
+# ===============================
+# PYGAME ENGINE
+# ===============================
+
+def engine_loop():
+    global engine_running, keys_pressed
+
+    pygame.init()
+    screen = pygame.display.set_mode((800, 600))
+    pygame.display.set_caption("HippoGame Window")
+
+    clock = pygame.time.Clock()
+    engine_running = True
+
+    while engine_running:
+
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                engine_running = False
+                pygame.quit()
+                return
+
+            if event.type == pygame.KEYDOWN:
+                keys_pressed.add(pygame.key.name(event.key).capitalize())
+
+            if event.type == pygame.KEYUP:
+                keys_pressed.discard(pygame.key.name(event.key).capitalize())
+
+        # Run forever block
+        for cmd in loop_block:
+            run_line(cmd)
+
+        # Render
+        screen.fill((0, 0, 0))
+
+        for obj in objects.values():
+            if obj["type"] == "circle":
+                pygame.draw.circle(
+                    screen,
+                    obj["color"],
+                    (obj["x"], obj["y"]),
+                    obj["r"]
+                )
+
+        pygame.display.flip()
+        clock.tick(60)
+
+# ===============================
+# PROGRAM EXECUTION
+# ===============================
+
 def run_program(code):
-    output.delete(1.0, tk.END)
+    global loop_block, objects, variables, engine_running, game_thread
+
+    output.delete("1.0", tk.END)
+
     variables.clear()
+    objects.clear()
+    loop_block = []
+    engine_running = False
 
-    for line in code.split("\n"):
-        line = line.strip()
-        if line:
-            result = run_line(line)
-            if result != "":
+    lines = code.split("\n")
+    i = 0
+
+    while i < len(lines):
+        line = lines[i].rstrip()
+
+        if line.strip() == "forever:":
+            i += 1
+            while i < len(lines) and lines[i].startswith("    "):
+                loop_block.append(lines[i].strip())
+                i += 1
+        else:
+            result = run_line(line.strip())
+            if result:
                 output.insert(tk.END, result + "\n")
+            i += 1
 
-# ==========================================================
-# GUI
-# ==========================================================
+    if hippogame_enabled:
+        game_thread = threading.Thread(target=engine_loop)
+        game_thread.daemon = True
+        game_thread.start()
+
+# ===============================
+# SAVE / LOAD
+# ===============================
+
+def save_program():
+    code = editor.get("1.0", tk.END)
+    file_path = filedialog.asksaveasfilename(defaultextension=".json",
+                                            filetypes=[("JSON files","*.json")])
+    if file_path:
+        json.dump({"code": code}, open(file_path, "w"))
+        messagebox.showinfo("Saved", "Program saved.")
+
+def load_program():
+    file_path = filedialog.askopenfilename(filetypes=[("JSON files","*.json")])
+    if file_path:
+        data = json.load(open(file_path, "r"))
+        editor.delete("1.0", tk.END)
+        editor.insert(tk.END, data.get("code", ""))
+        messagebox.showinfo("Loaded", "Program loaded.")
+
+# ===============================
+# TKINTER IDE
+# ===============================
 
 window = tk.Tk()
-window.title("HiHippo IDE 1.0")
+window.title("HiHippo IDE")
 window.geometry("900x700")
 
 top_frame = tk.Frame(window)
 top_frame.pack(side=tk.TOP, fill=tk.X, padx=5, pady=5)
 
-def on_run():
-    run_program(editor.get(1.0, tk.END))
+run_button = tk.Button(top_frame, text="Run Code", font=("Arial", 12),
+                       command=lambda: run_program(editor.get("1.0", tk.END)))
+run_button.pack(side=tk.LEFT, padx=5)
 
-def save_program():
-    code = editor.get(1.0, tk.END)
-    file_path = filedialog.asksaveasfilename(
-        defaultextension=".hippo",
-        filetypes=[("Hippo files","*.hippo")]
-    )
-    if file_path:
-        with open(file_path, "w") as f:
-            f.write(code)
-        messagebox.showinfo("Saved", "Program saved!")
+save_button = tk.Button(top_frame, text="Save Program", font=("Arial", 12),
+                        command=save_program)
+save_button.pack(side=tk.LEFT, padx=5)
 
-def load_program():
-    file_path = filedialog.askopenfilename(
-        filetypes=[("Hippo files","*.hippo")]
-    )
-    if file_path:
-        with open(file_path, "r") as f:
-            code = f.read()
-        editor.delete(1.0, tk.END)
-        editor.insert(tk.END, code)
-        messagebox.showinfo("Loaded", "Program loaded!")
-
-tk.Button(top_frame, text="Run Code", font=("Arial", 12), command=on_run).pack(side=tk.LEFT, padx=5)
-tk.Button(top_frame, text="Save", font=("Arial", 12), command=save_program).pack(side=tk.LEFT, padx=5)
-tk.Button(top_frame, text="Load", font=("Arial", 12), command=load_program).pack(side=tk.LEFT, padx=5)
+load_button = tk.Button(top_frame, text="Load Program", font=("Arial", 12),
+                        command=load_program)
+load_button.pack(side=tk.LEFT, padx=5)
 
 editor = scrolledtext.ScrolledText(window, font=("Consolas", 12), height=20)
 editor.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0,5))
 
-output = scrolledtext.ScrolledText(window, font=("Consolas", 12), height=10, bg="#111", fg="#0f0")
+output = scrolledtext.ScrolledText(window, font=("Consolas", 12),
+                                   height=10, bg="#111", fg="#0f0")
 output.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0,10))
 
 window.mainloop()
